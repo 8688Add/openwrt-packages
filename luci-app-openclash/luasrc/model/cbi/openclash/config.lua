@@ -12,6 +12,8 @@ font_green = [[<font color="green">]]
 font_off = [[</font>]]
 bold_on  = [[<strong>]]
 bold_off = [[</strong>]]
+align_mid = [[<p align="center">]]
+align_mid_off = [[</p>]]
 
 function IsYamlFile(e)
    e=e or""
@@ -27,16 +29,19 @@ end
 function default_config_set(f)
 	local cf=string.sub(luci.sys.exec("uci get openclash.config.config_path 2>/dev/null"), 1, -2)
 	if cf == "/etc/openclash/config/"..f or not cf or cf == "" or not fs.isfile(cf) then
+		if CHIF == "1" and cf == "/etc/openclash/config/"..f then
+			return
+		end
 		local fis = fs.glob("/etc/openclash/config/*")[1]
-    if fis ~= nil then
-    	fcf = fs.basename(fis)
-				if fcf then
-	  			luci.sys.exec(string.format('uci set openclash.config.config_path="/etc/openclash/config/%s"',fcf))
-	  			uci:commit("openclash")
-				end
+		if fis ~= nil then
+			fcf = fs.basename(fis)
+			if fcf then
+				luci.sys.exec(string.format('uci set openclash.config.config_path="/etc/openclash/config/%s"',fcf))
+				uci:commit("openclash")
+			end
 		else
-	  		luci.sys.exec("uci set openclash.config.config_path=/etc/openclash/config/config.yaml")
-	  		uci:commit("openclash")
+			luci.sys.exec("uci set openclash.config.config_path=/etc/openclash/config/config.yaml")
+			uci:commit("openclash")
 		end
 	end
 end
@@ -123,11 +128,11 @@ HTTP.setfilehandler(
 			if not meta then return end
 			
 			if fp == "config" then
-			   if meta and chunk then fd = nixio.open(dir .. meta.file, "w") end
+				if meta and chunk then fd = nixio.open(dir .. meta.file, "w") end
 			elseif fp == "proxy-provider" then
-			   if meta and chunk then fd = nixio.open(proxy_pro_dir .. meta.file, "w") end
+				if meta and chunk then fd = nixio.open(proxy_pro_dir .. meta.file, "w") end
 			elseif fp == "rule-provider" then
-			   if meta and chunk then fd = nixio.open(rule_pro_dir .. meta.file, "w") end
+				if meta and chunk then fd = nixio.open(rule_pro_dir .. meta.file, "w") end
 			end
 
 			if not fd then
@@ -141,26 +146,26 @@ HTTP.setfilehandler(
 		if eof and fd then
 			fd:close()
 			fd = nil
-      if IsYamlFile(meta.file) and fp == "config" then
-         local yamlbackup="/etc/openclash/backup/" .. meta.file
-         local c=fs.copy(dir .. meta.file,yamlbackup)
-         default_config_set(meta.file)
-      end
-      if IsYmlFile(meta.file) and fp == "config" then
-      	 local ymlname=string.lower(string.sub(meta.file,0,-5))
-         local ymlbackup="/etc/openclash/backup/".. ymlname .. ".yaml"
-         local c=fs.rename(dir .. meta.file,"/etc/openclash/config/".. ymlname .. ".yaml")
-         local c=fs.copy("/etc/openclash/config/".. ymlname .. ".yaml",ymlbackup)
-         local yamlname=ymlname .. ".yaml"
-         default_config_set(yamlname)
-      end
 			if fp == "config" then
-			   um.value = translate("File saved to") .. ' "/etc/openclash/config/"'
-			   CHIF = "1"
+				CHIF = "1"
+				if IsYamlFile(meta.file) then
+					local yamlbackup="/etc/openclash/backup/" .. meta.file
+					local c=fs.copy(dir .. meta.file,yamlbackup)
+					default_config_set(meta.file)
+				end
+				if IsYmlFile(meta.file) then
+					local ymlname=string.lower(string.sub(meta.file,0,-5))
+					local ymlbackup="/etc/openclash/backup/".. ymlname .. ".yaml"
+					local c=fs.rename(dir .. meta.file,"/etc/openclash/config/".. ymlname .. ".yaml")
+					local c=fs.copy("/etc/openclash/config/".. ymlname .. ".yaml",ymlbackup)
+					local yamlname=ymlname .. ".yaml"
+					default_config_set(yamlname)
+				end
+				um.value = translate("File saved to") .. ' "/etc/openclash/config/"'
 			elseif fp == "proxy-provider" then
-				 um.value = translate("File saved to") .. ' "/etc/openclash/proxy_provider/"'
+				um.value = translate("File saved to") .. ' "/etc/openclash/proxy_provider/"'
 			elseif fp == "rule-provider" then
-				 um.value = translate("File saved to") .. ' "/etc/openclash/rule_provider/"'
+				um.value = translate("File saved to") .. ' "/etc/openclash/rule_provider/"'
 			end
 			fs.unlink("/tmp/Proxy_Group")
 		end
@@ -217,7 +222,7 @@ st.template="openclash/cfg_check"
 nm=tb:option(DummyValue,"name",translate("Config Alias"))
 mt=tb:option(DummyValue,"mtime",translate("Update Time"))
 sz=tb:option(DummyValue,"size",translate("Size"))
-ck=tb:option(DummyValue,"check",translate("启动参数检查"))
+ck=tb:option(DummyValue,"check",translate("Parameter Check"))
 ck.template="openclash/cfg_check"
 
 btnis=tb:option(Button,"switch",translate("Switch Config"))
@@ -311,7 +316,7 @@ o.write = function()
   HTTP.redirect(DISP.build_url("admin", "services", "openclash", "rule-providers-file-manage"))
 end
 
-m = SimpleForm("config_file_edit",translate("Config File Edit"))
+m = SimpleForm("openclash",translate("Config File Edit"))
 m.reset = false
 m.submit = false
 
@@ -320,14 +325,16 @@ local tab = {
 }
 
 s = m:section(Table, tab)
+s.description = align_mid..translate("Support syntax check, press").." "..font_green..bold_on.."F11"..bold_off..font_off.." "..translate("to enter full screen editing mode")..align_mid_off
+s.anonymous = true
+s.addremove = false
 
 local conf = string.sub(luci.sys.exec("uci get openclash.config.config_path 2>/dev/null"), 1, -2)
 local dconf = "/usr/share/openclash/res/default.yaml"
 local conf_name = fs.basename(conf)
 if not conf_name or conf == "" then conf_name = "config.yaml" end
 
-sev = s:option(Value, "user")
-sev.template = "cbi/tvalue"
+sev = s:option(TextValue, "user")
 sev.description = translate("Modify Your Config file:").." "..font_green..bold_on..conf_name..bold_off..font_off.." "..translate("Here, Except The Settings That Were Taken Over")
 sev.rows = 40
 sev.wrap = "off"
@@ -341,8 +348,7 @@ if (CHIF == "0") then
 end
 end
 
-def = s:option(Value, "default")
-def.template = "cbi/tvalue"
+def = s:option(TextValue, "default")
 def.description = translate("Default Config File With Correct General-Settings")
 def.rows = 40
 def.wrap = "off"
@@ -353,6 +359,9 @@ end
 def.write = function(self, section, value)
 end
 
+o = s:option(DummyValue, "")
+o.anonymous=true
+o.template = "openclash/config_editor"
 
 local t = {
     {Commit, Apply}

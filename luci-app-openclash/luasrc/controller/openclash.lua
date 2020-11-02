@@ -14,6 +14,8 @@ function index()
 	entry({"admin", "services", "openclash", "status"},call("action_status")).leaf=true
 	entry({"admin", "services", "openclash", "state"},call("action_state")).leaf=true
 	entry({"admin", "services", "openclash", "startlog"},call("action_start")).leaf=true
+	entry({"admin", "services", "openclash", "refresh_log"},call("action_refresh_log"))
+	entry({"admin", "services", "openclash", "del_log"},call("action_del_log"))
 	entry({"admin", "services", "openclash", "close_all_connection"},call("action_close_all_connection"))
 	entry({"admin", "services", "openclash", "restore_history"},call("action_restore_history"))
 	entry({"admin", "services", "openclash", "get_history"},call("action_get_history"))
@@ -55,12 +57,27 @@ function index()
 end
 local fs = require "luci.openclash"
 
+local core_path_mode = luci.sys.exec("uci get openclash.config.small_flash_memory 2>/dev/null |tr -d '\n'")
+if core_path_mode ~= "1" then
+	dev_core_path="/etc/openclash/core/clash"
+	tun_core_path="/etc/openclash/core/clash_tun"
+	game_core_path="/etc/openclash/core/clash_game"
+else
+	dev_core_path="/tmp/etc/openclash/core/clash"
+	tun_core_path="/tmp/etc/openclash/core/clash_tun"
+	game_core_path="/tmp/etc/openclash/core/clash_game"
+end
+
 local function is_running()
 	return luci.sys.call("pidof clash >/dev/null") == 0
 end
 
 local function is_web()
 	return luci.sys.call("pidof clash >/dev/null") == 0
+end
+
+local function restricted_mode()
+	return luci.sys.exec("uci get openclash.config.restricted_mode 2>/dev/null |tr -d '\n'")
 end
 
 local function is_watchdog()
@@ -143,26 +160,26 @@ local function coremodel()
 end
 
 local function corecv()
-if not nixio.fs.access("/etc/openclash/core/clash") and not nixio.fs.access("/etc/openclash/clash") then
+if not nixio.fs.access(dev_core_path) then
   return "0"
 else
-	return luci.sys.exec("/etc/openclash/core/clash -v 2>/dev/null |awk -F ' ' '{print $2}'")
+	return luci.sys.exec(string.format("%s -v 2>/dev/null |awk -F ' ' '{print $2}'",dev_core_path))
 end
 end
 
 local function coretuncv()
-if not nixio.fs.access("/etc/openclash/core/clash_tun") then
+if not nixio.fs.access(tun_core_path) then
   return "0"
 else
-	return luci.sys.exec("/etc/openclash/core/clash_tun -v 2>/dev/null |awk -F ' ' '{print $2}'")
+	return luci.sys.exec(string.format("%s -v 2>/dev/null |awk -F ' ' '{print $2}'",tun_core_path))
 end
 end
 
 local function coregamecv()
-if not nixio.fs.access("/etc/openclash/core/clash_game") then
+if not nixio.fs.access(game_core_path) then
   return "0"
 else
-	return luci.sys.exec("/etc/openclash/core/clash_game -v 2>/dev/null |awk -F ' ' '{print $2}'")
+	return luci.sys.exec(string.format("%s -v 2>/dev/null |awk -F ' ' '{print $2}'",game_core_path))
 end
 end
 
@@ -295,6 +312,7 @@ function action_status()
 		uh_port = uh_port(),
 		web = is_web(),
 		cn_port = cn_port(),
+		restricted_mode = restricted_mode(),
 		mode = mode();
 	})
 end
@@ -426,4 +444,23 @@ function action_download_rule()
 	luci.http.write_json({
 		rule_download_status = download_rule();
 	})
+end
+
+function action_refresh_log()
+	local logfile="/tmp/openclash.log"
+	if not fs.access(logfile) then
+		luci.http.write("")
+		return
+	end
+	luci.http.prepare_content("text/plain; charset=utf-8")
+	local f=io.open(logfile, "r+")
+	f:seek("set")
+	local a=f:read(2048000) or ""
+	f:close()
+	luci.http.write(a)
+end
+
+function action_del_log()
+	luci.sys.exec("echo '' > /tmp/openclash.log")
+	return
 end

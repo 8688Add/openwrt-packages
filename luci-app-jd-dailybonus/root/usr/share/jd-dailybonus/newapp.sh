@@ -96,7 +96,7 @@ add_cron() {
 serverchan() {
     sckey=$(uci_get_by_type global serverchan)
     failed=$(uci_get_by_type global failed)
-    desc=$(cat /www/JD_DailyBonus.htm | sed 's/$/&\n/g' | sed -e '/左滑/d')
+    desc=$(cat /www/JD_DailyBonus.htm | grep -E '签到号|签到概览|签到总计|账号总计|其他总计' | sed 's/$/&\n/g')
     serverurlflag=$(uci_get_by_type global serverurl)
     serverurl=https://sc.ftqq.com/
     if [ "$serverurlflag" = "sct" ]; then
@@ -118,12 +118,14 @@ serverchan() {
 run() {
     fill_cookie
     echo -e $(date '+%Y-%m-%d %H:%M:%S %A') >$LOG_HTM 2>/dev/null
+    [ ! -f "/usr/bin/node" ] && echo "未安装node,请安装后再试!">>$LOG_HTM && return 1
     node $JD_SCRIPT >>$LOG_HTM 2>&1 &
 }
 
 back_run() {
     fill_cookie
     echo -e $(date '+%Y-%m-%d %H:%M:%S %A') >$LOG_HTM 2>/dev/null
+    [ ! -f "/usr/bin/node" ] && echo "未安装node,请安装后再试!">>$LOG_HTM && return 1
     node $JD_SCRIPT >>$LOG_HTM 2>/dev/null
     serverchan
 }
@@ -160,10 +162,14 @@ update() {
     fi
 }
 
-while getopts ":anruswh" arg; do
+while getopts ":alnruswh" arg; do
     case "$arg" in
     a)
         add_cron
+        exit 0
+        ;;
+    l)
+        serverchan
         exit 0
         ;;
     n)

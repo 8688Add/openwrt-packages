@@ -27,6 +27,7 @@ use_udp_node_resolve_dns=0
 LUA_API_PATH=/usr/lib/lua/luci/model/cbi/$CONFIG/api
 API_GEN_SS=$LUA_API_PATH/gen_shadowsocks.lua
 API_GEN_V2RAY=$LUA_API_PATH/gen_v2ray.lua
+API_GEN_V2RAY_PROTO=$LUA_API_PATH/gen_v2ray_proto.lua
 API_GEN_TROJAN=$LUA_API_PATH/gen_trojan.lua
 API_GEN_NAIVE=$LUA_API_PATH/gen_naiveproxy.lua
 echolog() {
@@ -218,12 +219,12 @@ ln_start_bin() {
 	shift 2;
 	if [  "${file_func%%/*}" != "${file_func}" ]; then
 		[ ! -L "${file_func}" ] && {
-			ln -s "${file_func}" "${TMP_BIN_PATH}/${ln_name}"
+			ln -s "${file_func}" "${TMP_BIN_PATH}/${ln_name}" >/dev/null 2>&1
 			file_func="${TMP_BIN_PATH}/${ln_name}"
 		}
 		[ -x "${file_func}" ] || echolog "  - $(readlink ${file_func}) 没有执行权限，无法启动：${file_func} $*"
 	fi
-	echo "${file_func} $*" >&2
+	#echo "${file_func} $*" >&2
 	[ -n "${file_func}" ] || echolog "  - 找不到 ${ln_name}，无法启动..."
 	${file_func:-echolog "  - ${ln_name}"} "$@" >/dev/null 2>&1 &
 }
@@ -308,12 +309,20 @@ load_config() {
 run_socks() {
 	local node=$1
 	local bind=$2
-	local local_port=$3
+	local socks_port=$3
 	local config_file=$4
+	local http_port=$5
+	local http_config_file=$6
+	local id=$7
+	local relay_port=$8
 	local type=$(echo $(config_n_get $node type) | tr 'A-Z' 'a-z')
 	local remarks=$(config_n_get $node remarks)
 	local server_host=$(config_n_get $node address)
 	local port=$(config_n_get $node port)
+	[ -n "$relay_port" ] && {
+		server_host="127.0.0.1"
+		port=$relay_port
+	}
 	local msg tmp
 
 	if [ -n "$server_host" ] && [ -n "$port" ]; then
@@ -329,33 +338,32 @@ run_socks() {
 	fi
 
 	[ -n "${msg}" ] && {
-		[ "$bind" != "127.0.0.1" ] && echolog "  - 启动中止 ${bind}:${local_port} ${msg}"
+		[ "$bind" != "127.0.0.1" ] && echolog "  - 启动中止 ${bind}:${socks_port} ${msg}"
 		return 1
 	}
-	[ "$bind" != "127.0.0.1" ] && echolog "  - 启动 ${bind}:${local_port}  - 节点：$remarks${tmp}"
+	[ "$bind" != "127.0.0.1" ] && echolog "  - 启动 ${bind}:${socks_port}  - 节点：$remarks${tmp}"
 
 	case "$type" in
 	socks)
-		local _username=$(config_n_get $node username)
-		local _password=$(config_n_get $node password)
+		_username=$(config_n_get $node username)
+		_password=$(config_n_get $node password)
 		[ -n "$_username" ] && [ -n "$_password" ] && local _auth="--uname $_username --passwd $_password"
-		ln_start_bin "$(first_type ssocks)" ssocks_SOCKS_$5 --listen $local_port --socks $server_host:$port $_auth
-		unset _username _password _auth
+		ln_start_bin "$(first_type ssocks)" ssocks_SOCKS_$id --listen $socks_port --socks $server_host:$port $_auth
 	;;
 	v2ray)
-		lua $API_GEN_V2RAY $node nil nil $local_port > $config_file
+		lua $API_GEN_V2RAY $node nil nil $socks_port > $config_file
 		ln_start_bin "$(first_type $(config_t_get global_app v2ray_file notset)/v2ray v2ray)" v2ray -config="$config_file"
 	;;
 	trojan-go)
-		lua $API_GEN_TROJAN $node client $bind $local_port > $config_file
+		lua $API_GEN_TROJAN $node client $bind $socks_port $server_host $port > $config_file
 		ln_start_bin "$(first_type $(config_t_get global_app trojan_go_file notset) trojan-go)" trojan-go -config "$config_file"
 	;;
 	trojan*)
-		lua $API_GEN_TROJAN $node client $bind $local_port > $config_file
+		lua $API_GEN_TROJAN $node client $bind $socks_port $server_host $port > $config_file
 		ln_start_bin "$(first_type ${type})" "${type}" -c "$config_file"
 	;;
 	naiveproxy)
-		lua $API_GEN_NAIVE $node socks $bind $local_port > $config_file
+		lua $API_GEN_NAIVE $node socks $bind $socks_port $server_host $port > $config_file
 		ln_start_bin "$(first_type naive)" naive "$config_file"
 	;;
 	brook)
@@ -364,13 +372,20 @@ run_socks() {
 		[ "$protocol" == "wsclient" ] && {
 			[ "$brook_tls" == "1" ] && server_host="wss://${server_host}" || server_host="ws://${server_host}" 
 		}
-		ln_start_bin "$(first_type $(config_t_get global_app brook_file notset) brook)" "brook_SOCKS_$5" "$protocol" --socks5 "$bind:$local_port" -s "$server_host:$port" -p "$(config_n_get $node password)"
+		ln_start_bin "$(first_type $(config_t_get global_app brook_file notset) brook)" "brook_SOCKS_$id" "$protocol" --socks5 "$bind:$socks_port" -s "$server_host:$port" -p "$(config_n_get $node password)"
 	;;
 	ss|ssr)
-		lua $API_GEN_SS $node $local_port > $config_file
+		lua $API_GEN_SS $node "0.0.0.0" $socks_port $server_host $port > $config_file
 		ln_start_bin "$(first_type ${type}-local)" "${type}-local" -c "$config_file" -b "$bind" -u
 	;;
 	esac
+	
+	# socks to http
+	[ "$http_port" != "0" ] && [ "$http_config_file" != "nil" ] && {
+		lua $API_GEN_V2RAY_PROTO http "0.0.0.0" $http_port socks "127.0.0.1" $socks_port $_username $_password > $http_config_file
+		ln_start_bin "$(first_type $(config_t_get global_app v2ray_file notset)/v2ray v2ray)" v2ray -config="$http_config_file"
+	}
+	unset _username _password _auth
 }
 
 run_redir() {
@@ -432,7 +447,7 @@ run_redir() {
 			fi
 		;;
 		ss|ssr)
-			lua $API_GEN_SS $node $local_port > $config_file
+			lua $API_GEN_SS $node "0.0.0.0" $local_port > $config_file
 			ln_start_bin "$(first_type ${type}-redir)" "${type}-redir" -c "$config_file" -U
 		;;
 		esac
@@ -508,11 +523,11 @@ run_redir() {
 		;;
 		ss|ssr)
 			if [ "$kcptun_use" == "1" ]; then
-				lua $API_GEN_SS $node $local_port 127.0.0.1 $KCPTUN_REDIR_PORT > $config_file
+				lua $API_GEN_SS $node "0.0.0.0" $local_port "127.0.0.1" $KCPTUN_REDIR_PORT > $config_file
 				process=1
 				[ "$6" == 1 ] && [ "$UDP_NODE1" == "tcp" ] && echolog "Kcptun不支持UDP转发！"
 			else
-				lua $API_GEN_SS $node $local_port > $config_file
+				lua $API_GEN_SS $node "0.0.0.0" $local_port > $config_file
 				[ "$6" == 1 ] && [ "$UDP_NODE1" == "tcp" ] && extra_param="-u"
 			fi
 			for k in $(seq 1 $process); do
@@ -578,15 +593,17 @@ start_socks() {
 			eval node=\$TCP_NODE$num
 		fi
 		[ "$node" == "nil" ] && continue
-		local config_file=$TMP_PATH/SOCKS_${id}.json
 		local port=$(config_n_get $id port)
-		run_socks $node "0.0.0.0" $port $config_file $id
+		local config_file=$TMP_PATH/SOCKS_${id}.json
+		local http_port=$(config_n_get $id http_port 0)
+		local http_config_file=$TMP_PATH/SOCKS2HTTP_${id}.json
+		run_socks $node "0.0.0.0" $port $config_file $http_port $http_config_file $id
 	done
 }
 
 clean_log() {
 	logsnum=$(cat $LOG_FILE 2>/dev/null | wc -l)
-	[ "$logsnum" -gt 300 ] && {
+	[ "$logsnum" -gt 1000 ] && {
 		echo "" > $LOG_FILE
 		echolog "日志文件过长，清空处理！"
 	}
@@ -863,6 +880,16 @@ add_dnsmasq() {
 				echolog "  - [$?]中国域名表(chnroute)：${fwd_dns:-默认}"
 			}
 		}
+		
+		#分流规则
+		fwd_dns="${TUN_DNS}"
+		#如果使用chnlist直接使用默认DNS
+		[ "${USE_CHNLIST}" = "1" ] && unset fwd_dns
+		local shunt_ids=$(uci show $CONFIG | grep "=shunt_rules" | awk -F '.' '{print $2}' | awk -F '=' '{print $1}')
+		for shunt_id in $shunt_ids; do
+			config_n_get $shunt_id domain_list | tr -s "\r\n" "\n" | gen_dnsmasq_items "shuntlist" "${fwd_dns}" "${TMP_DNSMASQ_PATH}/shunt_host.conf"
+			echolog "  - [$?]$shunt_id分流规则(shuntlist)：${fwd_dns:-默认}"
+		done
 
 		#始终使用远程DNS解析代理（黑名单）列表
 		fwd_dns="${TUN_DNS}"
@@ -1184,21 +1211,23 @@ stop() {
 	echolog "清空并关闭相关程序和缓存完成。"
 }
 
-case $1 in
+arg1=$1
+shift
+case $arg1 in
 get_new_port)
-	get_new_port $2 $3
+	get_new_port $@
 	;;
 run_socks)
-	run_socks $2 $3 $4 $5 $6
+	run_socks $@
 	;;
 run_redir)
-	run_redir $2 $3 $4 $5 $6 $7
+	run_redir $@
 	;;
 node_switch)
-	node_switch $2 $3 $4 $5
+	node_switch $@
 	;;
 stop)
-	[ "$2" = "force" ] && force_stop
+	[ "$1" = "force" ] && force_stop
 	stop
 	;;
 start)
