@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-vssr
-PKG_VERSION:=1.17-1
-PKG_RELEASE:=20200830
+PKG_VERSION:=1.22
+PKG_RELEASE:=20210205
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -11,8 +11,8 @@ config PACKAGE_$(PKG_NAME)_INCLUDE_V2ray_plugin
 	bool "Include Shadowsocks V2ray Plugin"
 	default y if i386||x86_64||arm||aarch64
 
-config PACKAGE_$(PKG_NAME)_INCLUDE_V2ray
-	bool "Include V2ray"
+config PACKAGE_$(PKG_NAME)_INCLUDE_Xray
+	bool "Include Xray"
 	default y if i386||x86_64||arm||aarch64
 
 config PACKAGE_$(PKG_NAME)_INCLUDE_Trojan
@@ -30,7 +30,7 @@ endef
 
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_V2ray_plugin \
-	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_V2ray \
+	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_Xray \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_Trojan \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_Kcptun \
 	CONFIG_PACKAGE_$(PKG_NAME)_INCLUDE_ShadowsocksR_Server
@@ -39,12 +39,12 @@ define Package/luci-app-vssr
  	SECTION:=luci
 	CATEGORY:=LuCI
 	SUBMENU:=3. Applications
-	TITLE:=A New SS/SSR/V2Ray/Trojan LuCI interface
+	TITLE:=A New SS/SSR/Xray/Trojan LuCI interface
 	PKGARCH:=all
-	DEPENDS:=+shadowsocksr-libev-alt +ipset +ip-full +iptables-mod-tproxy +dnsmasq-full +coreutils +coreutils-base64 +bash +pdnsd-alt +wget +luasocket +coreutils-nohup +lua-maxminddb \
+	DEPENDS:=+shadowsocksr-libev-alt +ipset +ip-full +iptables-mod-tproxy +dnsmasq-full +coreutils +coreutils-base64 +bash +pdnsd-alt +wget-ssl +lua +luasocket +lua-maxminddb \
 			+shadowsocks-libev-ss-local +shadowsocksr-libev-ssr-local +shadowsocks-libev-ss-redir +simple-obfs \
 			+PACKAGE_$(PKG_NAME)_INCLUDE_V2ray_plugin:v2ray-plugin \
-			+PACKAGE_$(PKG_NAME)_INCLUDE_V2ray:v2ray \
+			+PACKAGE_$(PKG_NAME)_INCLUDE_Xray:xray-core \
 			+PACKAGE_$(PKG_NAME)_INCLUDE_Trojan:trojan \
 			+PACKAGE_$(PKG_NAME)_INCLUDE_Trojan:ipt2socks \
 			+PACKAGE_$(PKG_NAME)_INCLUDE_Kcptun:kcptun-client \
@@ -58,12 +58,8 @@ define Build/Compile
 endef
 
 define Package/luci-app-vssr/conffiles
-	/etc/ssr_ip
-	/etc/dnsmasq.ssr/gfw_list.conf
-	/etc/china_ssr.txt
-	/etc/dnsmasq.ssr/gfw_list.conf
-	/etc/dnsmasq.ssr/gfw_base.conf
-	/etc/dnsmasq.oversea/oversea_list.conf
+	/etc/vssr/
+	/etc/config/vssr
 endef
 
 define Package/luci-app-vssr/install
